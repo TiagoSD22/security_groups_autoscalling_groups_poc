@@ -1,59 +1,8 @@
 import time
-import random
 from typing import List, Dict, Any, Optional
-from ec2 import EC2Instance
-from security_group import SecurityGroup
 from warm_pool_asg import WarmPool
-
-
-class LaunchTemplate:
-    """Defines configuration for EC2 instances launched by an Auto Scaling Group"""
-
-    def __init__(self, template_id: str, instance_type: str, ami_id: str,
-                 security_groups: Optional[List[SecurityGroup]] = None):
-        self.template_id = template_id
-        self.instance_type = instance_type
-        self.ami_id = ami_id
-        self.security_groups = security_groups or []
-
-    def create_instance(self, instance_id: str) -> EC2Instance:
-        """Create a new EC2 instance based on this template"""
-        instance = EC2Instance(instance_id, self.instance_type, self.ami_id)
-        for sg in self.security_groups:
-            instance.attach_security_group(sg)
-        return instance
-
-
-class EC2InstanceWithMetrics(EC2Instance):
-    """Extended EC2 instance that tracks metrics for scaling decisions"""
-
-    def __init__(self, instance_id: str, instance_type: str, ami_id: str):
-        super().__init__(instance_id, instance_type, ami_id)
-        self.metrics = {
-            "cpu_utilization": 0,
-            "memory_utilization": 0,
-            "network_in": 0,
-            "network_out": 0
-        }
-        self.health_status = "healthy"
-        self.health_check_count = 0
-
-    def update_metric(self, name: str, value: float) -> None:
-        """Update a specific metric value"""
-        if name in self.metrics:
-            self.metrics[name] = value
-
-    def get_metrics(self) -> Dict[str, float]:
-        """Get all current metrics"""
-        return self.metrics
-
-    def is_healthy(self) -> bool:
-        """Check if the instance is healthy"""
-        return self.status == "running" and self.health_status == "healthy"
-
-    def simulate_load(self, cpu_load: float) -> None:
-        """Simulate CPU load on the instance"""
-        self.update_metric("cpu_utilization", cpu_load)
+from launch_template import LaunchTemplate
+from ec2_instance_with_metrics import EC2InstanceWithMetrics
 
 
 class HealthCheck:
@@ -127,7 +76,7 @@ class AutoScalingGroup:
 
         # Initialize warm pool if size > 0
         self.warm_pool = None
-        if warm_pool_size > 0:
+        if warm_pool_size and warm_pool_size > 0:
             self.warm_pool = WarmPool(
                 size=warm_pool_size,
                 min_size=warm_pool_min_size,
@@ -240,3 +189,46 @@ class AutoScalingGroup:
         # Stop warm pool if configured
         if self.warm_pool:
             self.warm_pool.stop()
+
+    def add_scale_out_policy(self, policy: ScalingPolicy) -> None:
+        """Add a scale-out policy to the ASG"""
+        self.scale_out_policies.append(policy)
+
+    def add_scale_in_policy(self, policy: ScalingPolicy) -> None:
+        """Add a scale-in policy to the ASG"""
+        self.scale_in_policies.append(policy)
+
+    def simulate_traffic(self, base_load: float) -> None:
+        """Simulate traffic by applying a base load to all instances"""
+        for instance in self.instances:
+            # Simulate load on each instance
+            instance.simulate_load(base_load)
+
+    def evaluate_metrics(self) -> None:
+        """Evaluate metrics for scaling decisions"""
+        current_time = time.time()
+        avg_cpu_utilization = sum(
+            instance.metrics["cpu_utilization"] for instance in self.instances
+        ) / len(self.instances) if self.instances else 0
+
+        # Check scale-out policies
+        for policy in self.scale_out_policies:
+            if policy.should_scale(avg_cpu_utilization, current_time):
+                print(f"Scale-out triggered by policy: {policy.metric}")
+                for _ in range(policy.adjustment):
+                    self._add_instance()
+
+        # Check scale-in policies
+        for policy in self.scale_in_policies:
+            if policy.should_scale(avg_cpu_utilization, current_time):
+                print(f"Scale-in triggered by policy: {policy.metric}")
+                for _ in range(policy.adjustment):
+                    self._remove_instance()
+
+    def check_health(self) -> None:
+        """Perform health checks on all instances"""
+        for instance in self.instances:
+            if not self.health_check.check_instance(instance):
+                print(f"Instance {instance.resource_id} is unhealthy and will be replaced")
+                self._remove_instance()
+                self._add_instance()
