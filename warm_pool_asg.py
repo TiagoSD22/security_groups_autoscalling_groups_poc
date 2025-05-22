@@ -1,7 +1,8 @@
 import random
 from typing import Dict, Any, List
 
-from auto_scalling_group import EC2InstanceWithMetrics, LaunchTemplate
+from ec2_instance_with_metrics import EC2InstanceWithMetrics
+from launch_template import LaunchTemplate
 
 
 class WarmPool:
