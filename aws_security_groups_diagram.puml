@@ -1,0 +1,73 @@
+@startuml
+
+skinparam monochrome true
+skinparam defaultFontName Courier
+
+title AWS Security Groups with VPC, Subnets, and ACLs
+
+package "AWS Infrastructure" {
+    node "Internet" as Internet
+
+    package "VPC" {
+        component "Route Table" as RouteTable
+        component "Network ACL" as NACL {
+            [Stateless Rules]
+        }
+
+        package "Subnets" {
+            package "Public Subnet" {
+                component "Security Group" as PublicSG {
+                    [Ingress Rules]
+                    [Egress Rules]
+                }
+
+                component "EC2 Instance" as PublicEC2
+                component "Elastic Load Balancer" as ELB
+            }
+
+            package "Private Subnet" {
+                component "Security Group" as PrivateSG {
+                    [Ingress Rules]
+                    [Egress Rules]
+                }
+
+                component "RDS Instance" as PrivateRDS
+                component "Lambda Function" as PrivateLambda
+            }
+        }
+    }
+}
+
+Internet --> RouteTable : Inbound Traffic
+RouteTable --> NACL : Apply Rules
+NACL --> PublicSG : Filter Traffic
+PublicSG --> PublicEC2 : Forward Traffic
+PublicSG --> ELB : Forward Traffic
+
+PublicEC2 --> PrivateSG : Internal Communication
+ELB --> PrivateSG : Forward Traffic
+PrivateSG --> PrivateRDS : Forward Traffic
+PrivateSG --> PrivateLambda : Forward Traffic
+
+PrivateSG --> NACL : Outbound Traffic
+NACL --> RouteTable : Apply Rules
+RouteTable --> Internet : Outbound Traffic
+
+note right of PublicSG
+    Security Groups are stateful.
+    Ingress and Egress rules are evaluated
+    for each packet.
+end note
+
+note bottom of NACL
+    Network ACLs are stateless and operate
+    at the subnet level, providing an additional
+    layer of security.
+end note
+
+note bottom of RouteTable
+    Route Tables define how traffic is routed
+    within the VPC and to external networks.
+end note
+
+@enduml
